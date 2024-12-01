@@ -14,6 +14,7 @@ import warnings
 from importlib import import_module
 from pathlib import Path
 from shutil import copy
+from tqdm import tqdm
 from typing import Dict, List, Union
 
 import torch
@@ -53,6 +54,7 @@ def main(args: argparse.Namespace) -> None:
 
     # define database related paths
     output_dir = Path(args.output_dir)
+    print(output_dir)
     prefix_2019 = "ASVspoof2019.{}".format(track)
     database_path = Path(config["database_path"])
     dev_trial_path = (database_path /
@@ -300,7 +302,8 @@ def produce_evaluation_file(
         trial_lines = f_trl.readlines()
     fname_list = []
     score_list = []
-    for batch_x, utt_id in data_loader:
+    for batch_x, utt_id in tqdm(data_loader, desc="Processing batches"):
+        batch_x = batch_x.to(device)
         batch_x = batch_x.to(device)
         with torch.no_grad():
             _, batch_out = model(batch_x)
@@ -334,7 +337,7 @@ def train_epoch(
     # set objective (Loss) functions
     weight = torch.FloatTensor([0.1, 0.9]).to(device)
     criterion = nn.CrossEntropyLoss(weight=weight)
-    for batch_x, batch_y in trn_loader:
+    for batch_x, batch_y in tqdm(trn_loader, desc="Processing"):
         batch_size = batch_x.size(0)
         num_total += batch_size
         ii += 1
