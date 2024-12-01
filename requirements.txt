@@ -4,3 +4,4 @@ numpy
 soundfile
 tqdm
 matplotlib
+tensorboard

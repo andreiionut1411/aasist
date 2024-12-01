@@ -117,9 +117,9 @@ def main(args: argparse.Namespace) -> None:
     optimizer, scheduler = create_optimizer(model.parameters(), optim_config)
     optimizer_swa = SWA(optimizer)
 
-    best_dev_eer = 1.
+    best_dev_eer = 100.
     best_eval_eer = 100.
-    best_dev_tdcf = 0.05
+    best_dev_tdcf = 1.
     best_eval_tdcf = 1.
     n_swa_update = 0  # number of snapshots of model to use in SWA
     f_log = open(model_tag / "metric_log.txt", "a")
@@ -139,9 +139,10 @@ def main(args: argparse.Namespace) -> None:
         loss_history.append(running_loss)
         print("Training loss: " + str(running_loss))
 
-        if epoch == 0 or epoch + 1 % 5 == 0:
+        if epoch == 0 or (epoch + 1) % 5 == 0:
             dev_loss = produce_evaluation_file(dev_loader, model, device,
                                     metric_path/"dev_score.txt", dev_trial_path)
+            print("Dev Loss: " + str(dev_loss))
             dev_loss_history.append(dev_loss)
             dev_eer, dev_tdcf = calculate_tDCF_EER(
                 cm_scores_file=metric_path/"dev_score.txt",
@@ -160,29 +161,6 @@ def main(args: argparse.Namespace) -> None:
                 best_dev_eer = dev_eer
                 torch.save(model.state_dict(),
                         model_save_path / "epoch_{}_{:03.3f}.pth".format(epoch, dev_eer))
-
-                # do evaluation whenever best model is renewed
-                if str_to_bool(config["eval_all_best"]):
-                    produce_evaluation_file(eval_loader, model, device,
-                                            eval_score_path, eval_trial_path)
-                    eval_eer, eval_tdcf = calculate_tDCF_EER(
-                        cm_scores_file=eval_score_path,
-                        asv_score_file=database_path / config["asv_score_path"],
-                        output_file=metric_path /
-                        "t-DCF_EER_{:03d}epo.txt".format(epoch))
-
-                    log_text = "epoch{:03d}, ".format(epoch)
-                    if eval_eer < best_eval_eer:
-                        log_text += "best eer, {:.4f}%".format(eval_eer)
-                        best_eval_eer = eval_eer
-                    if eval_tdcf < best_eval_tdcf:
-                        log_text += "best tdcf, {:.4f}".format(eval_tdcf)
-                        best_eval_tdcf = eval_tdcf
-                        torch.save(model.state_dict(),
-                                model_save_path / "best.pth")
-                    if len(log_text) > 0:
-                        print(log_text)
-                        f_log.write(log_text + "\n")
 
                 print("Saving epoch {} for swa".format(epoch))
                 optimizer_swa.update_swa()
@@ -291,7 +269,7 @@ def get_loader(
 
     d_label_dev, file_dev = genSpoof_list(dir_meta=dev_trial_path,
                                             is_train=False,
-                                            is_eval=True)
+                                            is_eval=False)
     dev_set = Dataset_ASVspoof2019_train(list_IDs=file_dev,
                                             base_dir=dev_database_path,
                                             labels=d_label_dev)
@@ -337,13 +315,13 @@ def produce_evaluation_file(
         batch_x = batch_x.to(device)
         batch_y = batch_y.view(-1).type(torch.int64).to(device)
         with torch.no_grad():
-            logits, batch_out = model(batch_x)
+            _, batch_out = model(batch_x)
             batch_score = (batch_out[:, 1]).data.cpu().numpy().ravel()
         # add outputs
         fname_list.extend(utt_id)
         score_list.extend(batch_score.tolist())
 
-        batch_loss = criterion(logits, batch_y)  # Calculate batch loss
+        batch_loss = criterion(batch_out, batch_y)  # Calculate batch loss
         total_loss += batch_loss.item()
         num_batches += 1
 
@@ -375,7 +353,7 @@ def train_epoch(
     # set objective (Loss) functions
     weight = torch.FloatTensor([0.1, 0.9]).to(device)
     criterion = nn.CrossEntropyLoss(weight=weight)
-    for batch_x, batch_y in tqdm(trn_loader, desc="Processing"):
+    for batch_x, batch_y, _ in tqdm(trn_loader, desc="Processing"):
         batch_size = batch_x.size(0)
         num_total += batch_size
         ii += 1
