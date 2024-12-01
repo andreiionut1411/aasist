@@ -16,6 +16,7 @@ from pathlib import Path
 from shutil import copy
 from tqdm import tqdm
 from typing import Dict, List, Union
+import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn
@@ -127,12 +128,14 @@ def main(args: argparse.Namespace) -> None:
     # make directory for metric logging
     metric_path = model_tag / "metrics"
     os.makedirs(metric_path, exist_ok=True)
+    loss_history = []
 
     # Training
     for epoch in range(config["num_epochs"]):
         print("Start training epoch{:03d}".format(epoch))
         running_loss = train_epoch(trn_loader, model, optimizer, device,
                                    scheduler, config)
+        loss_history.append(running_loss)
         produce_evaluation_file(dev_loader, model, device,
                                 metric_path/"dev_score.txt", dev_trial_path)
         dev_eer, dev_tdcf = calculate_tDCF_EER(
@@ -181,6 +184,14 @@ def main(args: argparse.Namespace) -> None:
             n_swa_update += 1
         writer.add_scalar("best_dev_eer", best_dev_eer, epoch)
         writer.add_scalar("best_dev_tdcf", best_dev_tdcf, epoch)
+
+    plt.plot(range(config["num_epochs"]), loss_history, marker='o', label="Training Loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("Training Loss Over Epochs")
+    plt.legend()
+    plt.grid()
+    plt.show()
 
     print("Start final evaluation")
     epoch += 1
