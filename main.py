@@ -289,19 +289,24 @@ def get_loader(
                                 is_eval=False)
     print("no. validation files:", len(file_dev))
 
-    dev_set = Dataset_ASVspoof2019_devNeval(list_IDs=file_dev,
-                                            base_dir=dev_database_path)
+    d_label_dev, file_dev = genSpoof_list(dir_meta=dev_trial_path,
+                                            is_train=False,
+                                            is_eval=True)
+    dev_set = Dataset_ASVspoof2019_train(list_IDs=file_dev,
+                                            base_dir=dev_database_path,
+                                            labels=d_label_dev)
     dev_loader = DataLoader(dev_set,
                             batch_size=config["batch_size"],
                             shuffle=False,
                             drop_last=False,
                             pin_memory=True)
 
-    file_eval = genSpoof_list(dir_meta=eval_trial_path,
+    d_label_eval, file_eval = genSpoof_list(dir_meta=eval_trial_path,
                               is_train=False,
-                              is_eval=True)
-    eval_set = Dataset_ASVspoof2019_devNeval(list_IDs=file_eval,
-                                             base_dir=eval_database_path)
+                              is_eval=False)
+    eval_set = Dataset_ASVspoof2019_train(list_IDs=file_eval,
+                                             base_dir=eval_database_path,
+                                             labels=d_label_eval)
     eval_loader = DataLoader(eval_set,
                              batch_size=config["batch_size"],
                              shuffle=False,
@@ -327,10 +332,10 @@ def produce_evaluation_file(
     score_list = []
     total_loss = 0.0
     num_batches = 0
-    for batch_x, utt_id in tqdm(data_loader, desc="Processing batches"):
+    for batch_x, batch_y, utt_id in tqdm(data_loader, desc="Processing batches"):
         batch_x = batch_x.to(device)
         batch_x = batch_x.to(device)
-        batch_y = batch_x.clone()
+        batch_y = batch_y.view(-1).type(torch.int64).to(device)
         with torch.no_grad():
             logits, batch_out = model(batch_x)
             batch_score = (batch_out[:, 1]).data.cpu().numpy().ravel()

@@ -77,7 +77,7 @@ class Dataset_ASVspoof2019_train(Dataset):
         X_pad = pad_random(X, self.cut)
         x_inp = Tensor(X_pad)
         y = self.labels[key]
-        return x_inp, y
+        return x_inp, y, key
 
 
 class Dataset_ASVspoof2019_devNeval(Dataset):
