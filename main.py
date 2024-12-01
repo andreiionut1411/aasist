@@ -137,7 +137,7 @@ def main(args: argparse.Namespace) -> None:
         running_loss = train_epoch(trn_loader, model, optimizer, device,
                                    scheduler, config)
         loss_history.append(running_loss)
-        print("Training loss: " + loss_history)
+        print("Training loss: " + running_loss)
 
         if epoch == 0 or epoch + 1 % 5 == 0:
             dev_loss = produce_evaluation_file(dev_loader, model, device,
