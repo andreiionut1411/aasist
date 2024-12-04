@@ -251,7 +251,7 @@ def get_loader(
 
     train_set = Dataset_ASVspoof2019_train(list_IDs=file_train,
                                            labels=d_label_trn,
-                                           base_dir=trn_database_path)
+                                           base_dir=trn_database_path,is_eval=False)
     gen = torch.Generator()
     gen.manual_seed(seed)
     trn_loader = DataLoader(train_set,
@@ -272,7 +272,7 @@ def get_loader(
                                             is_eval=False)
     dev_set = Dataset_ASVspoof2019_train(list_IDs=file_dev,
                                             base_dir=dev_database_path,
-                                            labels=d_label_dev)
+                                            labels=d_label_dev, is_eval=False)
     dev_loader = DataLoader(dev_set,
                             batch_size=config["batch_size"],
                             shuffle=False,
@@ -284,7 +284,7 @@ def get_loader(
                               is_eval=False)
     eval_set = Dataset_ASVspoof2019_train(list_IDs=file_eval,
                                              base_dir=eval_database_path,
-                                             labels=d_label_eval)
+                                             labels=d_label_eval, is_eval=True)
     eval_loader = DataLoader(eval_set,
                              batch_size=config["batch_size"],
                              shuffle=False,
