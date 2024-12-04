@@ -60,13 +60,14 @@ def pad_random(x: np.ndarray, max_len: int = 64600):
 
 
 class Dataset_ASVspoof2019_train(Dataset):
-    def __init__(self, list_IDs, labels, base_dir):
+    def __init__(self, list_IDs, labels, base_dir, is_eval):
         """self.list_IDs	: list of strings (each string: utt key),
            self.labels      : dictionary (key: utt key, value: label integer)"""
         self.list_IDs = list_IDs
         self.labels = labels
         self.base_dir = base_dir
         self.cut = 64600  # take ~4 sec audio (64600 samples)
+        self.is_eval = is_eval
 
     def __len__(self):
         return len(self.list_IDs)
@@ -74,7 +75,11 @@ class Dataset_ASVspoof2019_train(Dataset):
     def __getitem__(self, index):
         key = self.list_IDs[index]
         X, _ = sf.read(str(self.base_dir / f"flac/{key}.flac"))
-        X_pad = pad_random(X, self.cut)
+
+        if self.is_eval:
+            X_pad = pad(X, self.cut)
+        else:
+            X_pad = pad_random(X, self.cut)
         x_inp = Tensor(X_pad)
         y = self.labels[key]
         return x_inp, y, key
