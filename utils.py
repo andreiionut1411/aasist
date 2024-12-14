@@ -8,6 +8,26 @@ import sys
 
 import numpy as np
 import torch
+from torch.utils.data import Dataset, DataLoader
+import torchaudio
+from tqdm import tqdm
+from speechbrain.nnet.pooling import StatisticsPooling
+import pickle as pkl
+
+
+class AudioDataset(Dataset):
+	def __init__(self, directory):
+		self.directory = directory
+		self.audio_files = [filename for filename in os.listdir(directory) if filename.endswith(".wav")]
+
+	def __len__(self):
+		return len(self.audio_files)
+
+	def __getitem__(self, idx):
+		filename = self.audio_files[idx]
+		filepath = os.path.join(self.directory, filename)
+		audio_input, _ = torchaudio.load(filepath)
+		return audio_input, filename
 
 
 def str_to_bool(val):
@@ -142,7 +162,7 @@ def seed_worker(worker_id):
 
 
 def set_seed(seed, config = None):
-    """ 
+    """
     set initial seed for reproduction
     """
     if config is None:
@@ -155,3 +175,55 @@ def set_seed(seed, config = None):
         torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = str_to_bool(config["cudnn_deterministic_toggle"])
         torch.backends.cudnn.benchmark = str_to_bool(config["cudnn_benchmark_toggle"])
+
+
+def collate_fn(batch):
+	batch.sort(key=lambda x: x[0].size(1), reverse=True)
+	audio_batch, filenames_batch = zip(*batch)
+	max_length = max(audio.size(1) for audio in audio_batch)
+	audio_batch_padded = []
+
+	# We pad the audios with 0s in order to be as long as the longest audio.
+	for audio in audio_batch:
+		if audio.size(1) < max_length:
+			pad_amount = max_length - audio.size(1)
+			audio = torch.nn.functional.pad(audio, (0, pad_amount))
+
+		audio = audio.squeeze(0)
+		audio_batch_padded.append(audio)
+
+	audio_batch_padded = torch.stack(audio_batch_padded)
+
+	return audio_batch_padded, filenames_batch
+
+
+def get_embeddings_wav2vec(directory: str, file: str, dataloader, batch_size: int=4, device: str='cuda') -> None:
+	"""The function computes the embeddings with wav2vec2 and writes them to
+		pickle file. The data is stored as key-value pairs where the key is the
+		base name of the file.
+
+	Args:
+		directory (str): The path to the directory that contains the data we want.
+		file (str): The path to the pickle file where we write the results
+		batch_size (int): The batch size. Defaults to 1.
+	"""
+	bundle = torchaudio.pipelines.WAV2VEC2_XLSR_300M
+	model = bundle.get_model().to(device)
+	sp_layer = StatisticsPooling()
+	embeddings_dict = {}
+	dataset = AudioDataset(directory)
+
+	for audio_batch, _, filenames_batch in tqdm(dataloader, desc="Computing embeddings", unit="batch"):
+		audio_batch = audio_batch.to(device)
+
+		with torch.inference_mode():
+			features, _ = model.extract_features(audio_batch)
+
+		stats_pooled_features = sp_layer(features[-1])
+
+		for audio, filename in zip(stats_pooled_features, filenames_batch):
+			filename += ".flac"
+			embeddings_dict[filename] = audio.squeeze(0).squeeze(0).cpu().numpy()
+
+	with open(file, "wb") as f:
+		pkl.dump(embeddings_dict, f)

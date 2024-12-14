@@ -27,7 +27,7 @@ from torchcontrib.optim import SWA
 from data_utils import (Dataset_ASVspoof2019_train,
                         Dataset_ASVspoof2019_devNeval, genSpoof_list)
 from evaluation import calculate_tDCF_EER
-from utils import create_optimizer, seed_worker, set_seed, str_to_bool
+from utils import create_optimizer, seed_worker, set_seed, str_to_bool, get_embeddings_wav2vec
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -55,7 +55,6 @@ def main(args: argparse.Namespace) -> None:
 
     # define database related paths
     output_dir = Path(args.output_dir)
-    print(output_dir)
     prefix_2019 = "ASVspoof2019.{}".format(track)
     database_path = Path(config["database_path"])
     dev_trial_path = (database_path /
@@ -92,6 +91,12 @@ def main(args: argparse.Namespace) -> None:
     # define dataloaders
     trn_loader, dev_loader, eval_loader = get_loader(
         database_path, args.seed, config)
+
+    if args.wav2vec:
+        get_embeddings_wav2vec(config['database_path'], 'train_wav2vec_embs.pkl', trn_loader)
+        get_embeddings_wav2vec(config['database_path'], 'dev_wav2vec_embs.pkl', dev_loader)
+        get_embeddings_wav2vec(config['database_path'], 'eval_wav2vec_embs.pkl', eval_loader)
+        return
 
     # evaluates pretrained model and exit script
     if args.eval:
@@ -407,4 +412,7 @@ if __name__ == "__main__":
                         type=str,
                         default=None,
                         help="directory to the model weight file (can be also given in the config file)")
+    parser.add_argument("--wav2vec",
+                        action="store_true",
+                        help="when this flag is given, compute the wav2vec2 embeddings")
     main(parser.parse_args())
