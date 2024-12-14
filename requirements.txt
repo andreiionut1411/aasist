@@ -7,3 +7,4 @@ matplotlib
 tensorboard
 torhaudio
 speechbrain
+nemo_toolkit['asr']

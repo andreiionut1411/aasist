@@ -137,3 +137,5 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+train_wav2vec_embs.pkl
