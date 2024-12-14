@@ -5,6 +5,5 @@ soundfile
 tqdm
 matplotlib
 tensorboard
-torhaudio
+torchaudio
 speechbrain
-nemo_toolkit['asr']
