@@ -546,7 +546,7 @@ class Model(nn.Module):
         x = F.max_pool2d(x, kernel_size=(3, 3))
         x = self.first_bn(x)
         x = self.selu(x)
-        
+
         # get embeddings using encoder
         # (#bs, #filt, #spec, #seq)
         e = self.encoder(x)
