@@ -489,12 +489,6 @@ class Model(nn.Module):
         self.drop_way = nn.Dropout(0.2, inplace=True)
         self.selu = nn.SELU(inplace=True)
 
-        self.encoder = nn.Conv2d(in_channels=filts[4][0],
-                               out_channels=filts[4][1],
-                               kernel_size=(2, 3),
-                               padding=(1, 1),
-                               stride=1)
-
         self.encoder = nn.Sequential(
             nn.Sequential(Residual_block(nb_filts=filts[4], first=True)))
 

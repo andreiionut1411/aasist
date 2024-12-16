@@ -16,12 +16,15 @@ import torchaudio
 
 
 class GraphAttentionLayer(nn.Module):
-    def __init__(self, in_dim, out_dim, **kwargs):
+    def __init__(self, in_dim, out_dim, num_heads=4, **kwargs):
         super().__init__()
 
+        self.num_heads = num_heads
+        self.head_dim = out_dim // num_heads  # split output dim across heads
+
         # attention map
-        self.att_proj = nn.Linear(in_dim, out_dim)
-        self.att_weight = self._init_new_params(out_dim, 1)
+        self.att_proj_heads = nn.ModuleList([nn.Linear(in_dim, self.head_dim) for _ in range(num_heads)])
+        self.att_weight = self._init_new_params(self.head_dim, 1)  # Make sure this depends on head_dim
 
         # project
         self.proj_with_att = nn.Linear(in_dim, out_dim)
@@ -49,10 +52,10 @@ class GraphAttentionLayer(nn.Module):
         x = self.input_drop(x)
 
         # derive attention map
-        att_map = self._derive_att_map(x)
+        att_map = self._derive_att_map(x)  # [#bs, #num_heads, #node, #node]
 
         # projection
-        x = self._project(x, att_map)
+        x = self._project(x, att_map)  # x: [#bs, #node, #out_dim]
 
         # apply batch norm
         x = self._apply_BN(x)
@@ -62,38 +65,39 @@ class GraphAttentionLayer(nn.Module):
     def _pairwise_mul_nodes(self, x):
         '''
         Calculates pairwise multiplication of nodes.
-        - for attention map
-        x           :(#bs, #node, #dim)
-        out_shape   :(#bs, #node, #node, #dim)
         '''
-
         nb_nodes = x.size(1)
         x = x.unsqueeze(2).expand(-1, -1, nb_nodes, -1)
         x_mirror = x.transpose(1, 2)
-
         return x * x_mirror
 
     def _derive_att_map(self, x):
-        '''
-        x           :(#bs, #node, #dim)
-        out_shape   :(#bs, #node, #node, 1)
-        '''
-        att_map = self._pairwise_mul_nodes(x)
-        # size: (#bs, #node, #node, #dim_out)
-        att_map = torch.tanh(self.att_proj(att_map))
-        # size: (#bs, #node, #node, 1)
-        att_map = torch.matmul(att_map, self.att_weight)
-
-        # apply temperature
-        att_map = att_map / self.temp
-
-        att_map = F.softmax(att_map, dim=-2)
-
-        return att_map
+        att_maps = []
+        for i in range(self.num_heads):
+            att_map = self._pairwise_mul_nodes(x)  # [#bs, #node, #node, #in_dim]
+            att_map = torch.tanh(self.att_proj_heads[i](att_map))  # [#bs, #node, #node, #head_dim]
+            att_map = torch.matmul(att_map, self.att_weight)  # [#bs, #node, #node, 1]
+            att_map = att_map / self.temp  # apply temperature
+            att_map = F.softmax(att_map, dim=-2)  # normalize over nodes
+            att_maps.append(att_map.squeeze(-1))  # remove the last dimension
+        att_maps = torch.stack(att_maps, dim=1)  # [#bs, #num_heads, #node, #node]
+        return att_maps
 
     def _project(self, x, att_map):
-        x1 = self.proj_with_att(torch.matmul(att_map.squeeze(-1), x))
-        x2 = self.proj_without_att(x)
+        bs, nodes, dim = x.size()
+        x_reshaped = x.view(bs, nodes, self.num_heads, self.head_dim)
+        x_reshaped = x_reshaped.permute(0, 2, 1, 3)
+
+        # Apply attention to each head
+        x1 = torch.matmul(att_map, x_reshaped)
+
+        # Concatenate or flatten multiple heads
+        x1 = x1.permute(0, 2, 1, 3).contiguous()
+        x1 = x1.view(bs, nodes, -1)  # [#bs, #node, #out_dim] (recombine heads, where out_dim = num_heads * head_dim)
+
+        # Project the original input x (NOT the reshaped version)
+        x1 = self.proj_with_att(x1)
+        x2 = self.proj_without_att(x)  # [#bs, #node, #out_dim] (x is original input from forward)
 
         return x1 + x2
 
@@ -102,7 +106,6 @@ class GraphAttentionLayer(nn.Module):
         x = x.view(-1, org_size[-1])
         x = self.bn(x)
         x = x.view(org_size)
-
         return x
 
     def _init_new_params(self, *size):
