@@ -16,12 +16,11 @@ import torchaudio
 
 
 class GraphAttentionLayer(nn.Module):
-    def __init__(self, in_dim, out_dim, num_heads=4, **kwargs):
+    def __init__(self, in_dim, out_dim, **kwargs):
         super().__init__()
 
         # attention map
-        self.num_heads = num_heads
-        self.att_proj_heads = nn.ModuleList([nn.Linear(in_dim, out_dim) for _ in range(num_heads)])  # List of attention projections
+        self.att_proj = nn.Linear(in_dim, out_dim)
         self.att_weight = self._init_new_params(out_dim, 1)
 
         # project
@@ -76,27 +75,27 @@ class GraphAttentionLayer(nn.Module):
 
     def _derive_att_map(self, x):
         '''
-        Computes attention map for each head.
+        x           :(#bs, #node, #dim)
+        out_shape   :(#bs, #node, #node, 1)
         '''
-        att_maps = []
-        for i in range(self.num_heads):
-            att_map = self._pairwise_mul_nodes(x)
-            att_map = torch.tanh(self.att_proj_heads[i](att_map))
-            att_map = torch.matmul(att_map, self.att_weight)
-            att_map = att_map / self.temp  # apply temperature
-            att_map = F.softmax(att_map, dim=-2)  # normalize over nodes
-            att_maps.append(att_map)
+        att_map = self._pairwise_mul_nodes(x)
+        # size: (#bs, #node, #node, #dim_out)
+        att_map = torch.tanh(self.att_proj(att_map))
+        # size: (#bs, #node, #node, 1)
+        att_map = torch.matmul(att_map, self.att_weight)
 
-        # Stack the attention maps for all heads (dimension: [#bs, #node, #node, #num_heads])
-        return torch.stack(att_maps, dim=-1)
+        # apply temperature
+        att_map = att_map / self.temp
+
+        att_map = F.softmax(att_map, dim=-2)
+
+        return att_map
 
     def _project(self, x, att_map):
-        x1 = torch.matmul(att_map.squeeze(-1), x)  # attention-weighted features
-        x1 = self.proj_with_att(x1)
+        x1 = self.proj_with_att(torch.matmul(att_map.squeeze(-1), x))
+        x2 = self.proj_without_att(x)
 
-        x2 = self.proj_without_att(x)  # features without attention
-
-        return x1 + x2  
+        return x1 + x2
 
     def _apply_BN(self, x):
         org_size = x.size()
