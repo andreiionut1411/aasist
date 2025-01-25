@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 
-losses_file = './losses/losses_wav2vec.txt'
+losses_file = './losses/losses_multihead.txt'
 
 with open(losses_file) as file:
     lines = file.readlines()
