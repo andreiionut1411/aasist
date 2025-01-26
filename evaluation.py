@@ -83,6 +83,12 @@ def calculate_tDCF_EER(cm_scores_file,
                                              cost_model,
                                              print_cost=False)
 
+    with open("threshold.txt", 'w') as file:
+        file.write(", ".join(map(str, CM_thresholds.tolist())))
+        file.write("\n")
+        threshold = compute_eer(bona_cm, spoof_cm)[1]
+        file.write(str(threshold))
+
     # Minimum t-DCF
     min_tDCF_index = np.argmin(tDCF_curve)
     min_tDCF = tDCF_curve[min_tDCF_index]

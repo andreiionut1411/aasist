@@ -139,3 +139,4 @@ dmypy.json
 .pyre/
 
 train_wav2vec_embs.pkl
+echo_test
