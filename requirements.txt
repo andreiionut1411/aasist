@@ -7,3 +7,10 @@ matplotlib
 tensorboard
 torchaudio
 speechbrain
+scikit-learn
+librosa
+noisereduce
+scipy
+pydub
+ffmpeg
+p-tqdm

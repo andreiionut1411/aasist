@@ -43,10 +43,10 @@ def process_files(file1_path, file2_path, output_path, threshold):
             output_file.write(f"{output_label} {score:.4f}\n")
 
 
-thresholds = {"wav2vec": 1.465143, "aasist_pretrained": 1.49328, "aasist": 1.282139, "RAWGAT-ST": 0.608895, "RAWNET": 0.006465, "multihead": 3.4528308, "vanilla_wav2vec": 3.0124712}
-file1_path = "/home/andrei/facultate/licenta/combined_test_file.txt"
-file2_path = "echo_test/aasist_init_results.txt"
-output_path = "echo_test/aasist_results.txt"
-threshold = thresholds['aasist']
+thresholds = {"wav2vec": 1.465143, "aasist_pretrained": 1.49328, "aasist": 1.282139, "RAWGAT-ST": 0.608895, "RAWNET": -0.006465, "multihead": 3.4528308, "vanilla_wav2vec": 3.0124712}
+file1_path = "/home/andrei/facultate/licenta/rsc_combined_test_file.txt"
+file2_path = "rsc_test/wav2vec_init_results.txt"
+output_path = "rsc_test/wav2vec_results.txt"
+threshold = thresholds["wav2vec"]
 
 process_files(file1_path, file2_path, output_path, threshold)

@@ -540,8 +540,11 @@ class Model(nn.Module):
 
     def forward(self, x, Freq_aug=False):
         x = self.wav2vec2.extract_features(x)[0][-1]
+        print(x.shape)
         x = self.fc_finetune(x)
+        print(x.shape)
         x = x.transpose(1, 2)
+        print(x.shape)
         x = x.unsqueeze(1)
         x = F.max_pool2d(x, kernel_size=(3, 3))
         x = self.first_bn(x)
