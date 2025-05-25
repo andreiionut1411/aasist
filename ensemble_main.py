@@ -188,11 +188,6 @@ def main(args: argparse.Namespace) -> None:
     for p in model2.parameters():
         p.requires_grad = False
 
-    for p in model1.out_layer.parameters():
-        p.requires_grad = True
-    for p in model2.out_layer.parameters():
-        p.requires_grad = True
-
     sample_batch = next(iter(trn_loader))
     sample_input = sample_batch[0].to(device)
 
