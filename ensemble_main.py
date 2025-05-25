@@ -264,7 +264,7 @@ def main(args: argparse.Namespace) -> None:
         loss_history.append(running_loss)
         print("Training loss: " + str(running_loss))
 
-        if epoch == 0 or (epoch + 1) % 5 == 0:
+        if epoch == 0 or (epoch + 1) % 3 == 0:
             dev_loss = produce_evaluation_file(dev_loader, model, device,
                                     metric_path/"dev_score.txt", dev_trial_path)
             print("Dev Loss: " + str(dev_loss))
