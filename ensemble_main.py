@@ -34,26 +34,30 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 class MoEGate(nn.Module):
-    def __init__(self, input_dim, num_experts=2, hidden_dim=128, use_conv=True):
+    def __init__(self, input_dim, num_experts=2, num_classes=2, hidden_dim=128, use_conv=True):
         super().__init__()
         self.use_conv = use_conv
+        self.num_experts = num_experts
+        self.num_classes = num_classes
+
         if self.use_conv:
             self.conv = nn.Conv1d(in_channels=1, out_channels=4, kernel_size=1)
             self.fc1 = nn.Linear(4 * input_dim, hidden_dim)
         else:
             self.fc1 = nn.Linear(input_dim, hidden_dim)
 
-        self.fc2 = nn.Linear(hidden_dim, num_experts)
-        self.softmax = nn.Softmax(dim=1)
+        self.fc2 = nn.Linear(hidden_dim, num_experts * num_classes)
+        self.softmax = nn.Softmax(dim=1)  # softmax over experts
 
-    def forward(self, x):  # x: [B, D]
+    def forward(self, x):
         if self.use_conv:
-            x = x.unsqueeze(1)  # [B, 1, D]
-            x = F.relu(self.conv(x))  # [B, 4, D]
-            x = x.view(x.size(0), -1)  # [B, 4*D]
-        x = F.relu(self.fc1(x))       # [B, hidden_dim]
-        weights = self.softmax(self.fc2(x))  # [B, num_experts]
-        return weights
+            x = x.unsqueeze(1)
+            x = F.relu(self.conv(x))
+            x = x.view(x.size(0), -1)
+        x = F.relu(self.fc1(x))
+        gate_logits = self.fc2(x).view(-1, self.num_experts, self.num_classes)
+        weights = self.softmax(gate_logits.transpose(1, 2))  # [B, C, E]
+        return weights.transpose(1, 2)
 
 
 class CombinedModel(nn.Module):
@@ -77,24 +81,27 @@ class CombinedModel(nn.Module):
         )
 
     def forward(self, x, Freq_aug=None):
-        # Extract features from each expert
+    # Feature extraction
         feat1 = self.model1.extract_features(x)
         feat2 = self.model2.extract_features(x)
-        combined_feat = torch.cat([feat1, feat2], dim=1)  # [B, D1 + D2]
+        combined_feat = torch.cat([feat1, feat2], dim=1)
 
-        # Get per-sample weights for experts
-        weights = self.gate(combined_feat)  # [B, 2]
+        # Gating
+        weights = self.gate(combined_feat)  # [B, 2, C]
 
-        # Get expert predictions
-        _, out1 = self.model1(x, Freq_aug=Freq_aug)
-        _, out2 = self.model2(x, Freq_aug=Freq_aug)
+        # Expert predictions
+        _, out1 = self.model1(x, Freq_aug=Freq_aug)  # [B, C]
+        _, out2 = self.model2(x, Freq_aug=Freq_aug)  # [B, C]
+        out1 = out1.unsqueeze(1)  # [B, 1, C]
+        out2 = out2.unsqueeze(1)  # [B, 1, C]
 
-        # Combine predictions via expert weights
-        out = weights[:, 0:1] * out1 + weights[:, 1:2] * out2  # [B, C]
+        expert_outs = torch.cat([out1, out2], dim=1)  # [B, 2, C]
 
-        # Optional convolutional layer after gating (from MoE paper)
+        # Weighted sum
+        out = torch.sum(weights * expert_outs, dim=1)  # [B, C]
+
+        # Optional post-gate refinement
         out = self.post_gate_conv(out)
-
         return combined_feat, out
 
 
@@ -181,6 +188,11 @@ def main(args: argparse.Namespace) -> None:
     for p in model2.parameters():
         p.requires_grad = False
 
+    for p in model1.out_layer.parameters():
+        p.requires_grad = True
+    for p in model2.out_layer.parameters():
+        p.requires_grad = True
+
     sample_batch = next(iter(trn_loader))
     sample_input = sample_batch[0].to(device)
 
@@ -216,11 +228,11 @@ def main(args: argparse.Namespace) -> None:
             feature_dim2 = model2.extract_features(sample_input).shape[1]
 
         # Build ensemble model
-        model = CombinedModel(model1, model2, feature_dim1, feature_dim2).to(device)
+        model = CombinedModel(model1, model2, feature_dim1, feature_dim2, num_classes).to(device)
 
         # Load trained ensemble weights
-        model.load_state_dict(torch.load(model_config1["ens_path"], map_location=device))
-        print("Model loaded : {}".format(model_config1["ens_path"]))
+        model.load_state_dict(torch.load(config1["ens_path"], map_location=device))
+        print("Model loaded : {}".format(config1["ens_path"]))
 
         # Run evaluation
         print("Start evaluation...")

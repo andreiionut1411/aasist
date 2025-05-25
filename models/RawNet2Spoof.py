@@ -226,7 +226,7 @@ class Model(nn.Module):
         self.fc1_gru = nn.Linear(in_features=d_args["gru_node"],
                                  out_features=d_args["nb_fc_node"])
 
-        self.fc2_gru = nn.Linear(
+        self.out_layer = nn.Linear(
             in_features=d_args["nb_fc_node"],
             out_features=d_args["nb_classes"],
             bias=True,
@@ -301,7 +301,7 @@ class Model(nn.Module):
         x, _ = self.gru(x)
         x = x[:, -1, :]
         last_hidden = self.fc1_gru(x)
-        x = self.fc2_gru(last_hidden)
+        x = self.out_layer(last_hidden)
         output = self.logsoftmax(x)
 
         return last_hidden, output
