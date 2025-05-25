@@ -28,22 +28,74 @@ from data_utils import (Dataset_ASVspoof2019_train,
                         Dataset_ASVspoof2019_devNeval, genSpoof_list)
 from evaluation import calculate_tDCF_EER
 from utils import create_optimizer, seed_worker, set_seed, str_to_bool, get_embeddings_wav2vec
+import torch.nn.functional as F
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 
+class MoEGate(nn.Module):
+    def __init__(self, input_dim, num_experts=2, hidden_dim=128, use_conv=True):
+        super().__init__()
+        self.use_conv = use_conv
+        if self.use_conv:
+            self.conv = nn.Conv1d(in_channels=1, out_channels=4, kernel_size=1)
+            self.fc1 = nn.Linear(4 * input_dim, hidden_dim)
+        else:
+            self.fc1 = nn.Linear(input_dim, hidden_dim)
+
+        self.fc2 = nn.Linear(hidden_dim, num_experts)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x):  # x: [B, D]
+        if self.use_conv:
+            x = x.unsqueeze(1)  # [B, 1, D]
+            x = F.relu(self.conv(x))  # [B, 4, D]
+            x = x.view(x.size(0), -1)  # [B, 4*D]
+        x = F.relu(self.fc1(x))       # [B, hidden_dim]
+        weights = self.softmax(self.fc2(x))  # [B, num_experts]
+        return weights
+
+
 class CombinedModel(nn.Module):
-    def __init__(self, model1, model2, dim1, dim2, num_classes):
+    def __init__(self, model1, model2, dim1, dim2, num_classes, use_conv_gate=True):
         super().__init__()
         self.model1 = model1
         self.model2 = model2
-        self.classifier = nn.Linear(dim1 + dim2, num_classes)
+        self.feature_dim = dim1 + dim2
+        self.num_classes = num_classes
 
-    def forward(self, x):
+        self.gate = MoEGate(input_dim=self.feature_dim,
+                            num_experts=2,
+                            hidden_dim=128,
+                            use_conv=use_conv_gate)
+
+        # Optional: additional processing layer after gating (like in the paper)
+        self.post_gate_conv = nn.Sequential(
+            nn.Linear(num_classes, num_classes),
+            nn.ReLU(),
+            nn.Linear(num_classes, num_classes)
+        )
+
+    def forward(self, x, Freq_aug=None):
+        # Extract features from each expert
         feat1 = self.model1.extract_features(x)
         feat2 = self.model2.extract_features(x)
-        combined = torch.cat((feat1, feat2), dim=1)
-        return self.classifier(combined)
+        combined_feat = torch.cat([feat1, feat2], dim=1)  # [B, D1 + D2]
+
+        # Get per-sample weights for experts
+        weights = self.gate(combined_feat)  # [B, 2]
+
+        # Get expert predictions
+        _, out1 = self.model1(x, Freq_aug=Freq_aug)
+        _, out2 = self.model2(x, Freq_aug=Freq_aug)
+
+        # Combine predictions via expert weights
+        out = weights[:, 0:1] * out1 + weights[:, 1:2] * out2  # [B, C]
+
+        # Optional convolutional layer after gating (from MoE paper)
+        out = self.post_gate_conv(out)
+
+        return combined_feat, out
 
 
 def main(args: argparse.Namespace) -> None:
@@ -89,7 +141,7 @@ def main(args: argparse.Namespace) -> None:
     # define model related paths
     model_tag = "{}_{}_ep{}_bs{}".format(
         track,
-        os.path.splitext(os.path.basename(args.config))[0],
+        os.path.splitext(os.path.basename(args.config1))[0],
         config["num_epochs"], config["batch_size"])
     if args.comment:
         model_tag = model_tag + "_{}".format(args.comment)
@@ -98,7 +150,7 @@ def main(args: argparse.Namespace) -> None:
     eval_score_path = model_tag / config["eval_output"]
     writer = SummaryWriter(model_tag)
     os.makedirs(model_save_path, exist_ok=True)
-    copy(args.config, model_tag / "config.conf")
+    copy(args.config1, model_tag / "config.conf")
 
     # set device
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -137,27 +189,53 @@ def main(args: argparse.Namespace) -> None:
         feat2 = model2.extract_features(sample_input)
         feature_dim1 = feat1.shape[1]
         feature_dim2 = feat2.shape[1]
-    num_classes = model_config1["num_classes"]
+    num_classes = model1.out_layer.out_features
     model = CombinedModel(model1, model2, feature_dim1, feature_dim2, num_classes).to(device)
 
     # evaluates pretrained model and exit script
     if args.eval:
-        model.load_state_dict(
-            torch.load(config["model_path"], map_location=device))
-        print("Model loaded : {}".format(config["model_path"]))
+        with open(args.config1, "r") as f1, open(args.config2, "r") as f2:
+            config1 = json.load(f1)
+            config2 = json.load(f2)
+
+        model_config1 = config1["model_config"]
+        model_config2 = config2["model_config"]
+
+        # Load both models
+        model1 = get_model(model_config1, device)
+        model2 = get_model(model_config2, device)
+
+        # Load weights
+        model1.load_state_dict(torch.load(config1["model_path"], map_location=device))
+        model2.load_state_dict(torch.load(config2["model_path"], map_location=device))
+
+        # Get feature dimensions dynamically
+        sample_input = next(iter(eval_loader))[0].to(device)
+        with torch.no_grad():
+            feature_dim1 = model1.extract_features(sample_input).shape[1]
+            feature_dim2 = model2.extract_features(sample_input).shape[1]
+
+        # Build ensemble model
+        model = CombinedModel(model1, model2, feature_dim1, feature_dim2).to(device)
+
+        # Load trained ensemble weights
+        model.load_state_dict(torch.load(model_config1["ens_path"], map_location=device))
+        print("Model loaded : {}".format(model_config1["ens_path"]))
+
+        # Run evaluation
         print("Start evaluation...")
         produce_evaluation_file(eval_loader, model, device,
                                 eval_score_path, eval_trial_path)
         calculate_tDCF_EER(cm_scores_file=eval_score_path,
-                           asv_score_file=database_path /
-                           config["asv_score_path"],
-                           output_file=model_tag / "t-DCF_EER.txt")
+                        asv_score_file=database_path / config["asv_score_path"],
+                        output_file=model_tag / "t-DCF_EER.txt")
         print("DONE.")
         eval_eer, eval_tdcf = calculate_tDCF_EER(
             cm_scores_file=eval_score_path,
             asv_score_file=database_path / config["asv_score_path"],
-            output_file=model_tag/"loaded_model_t-DCF_EER.txt")
+            output_file=model_tag / "loaded_model_t-DCF_EER.txt")
         sys.exit(0)
+
 
     # get optimizer and scheduler
     optim_config["steps_per_epoch"] = len(trn_loader)
