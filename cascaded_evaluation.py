@@ -1,8 +1,8 @@
 from tqdm import tqdm
 
-spoofing_file = "echo_test_noiseless/multihead_aasist_results.txt"   # Contains: 0/1 score
-verification_file = "echo_test_noiseless/titanet.txt"  # Contains: 0/1 score
-ground_truth_file = "/home/andrei/facultate/licenta/combined_test_file.txt"  # Contains: 0/1 file1 file2
+spoofing_file = "rsc_test/wav2vec_results.txt"   # Contains: 0/1 score
+verification_file = "rsc_test/titanet.txt"  # Contains: 0/1 score
+ground_truth_file = "/home/andrei/facultate/licenta/rsc_combined_test_file.txt"  # Contains: 0/1 file1 file2
 
 # Read all files line by line
 with open(spoofing_file, "r") as f1, open(verification_file, "r") as f2, open(ground_truth_file, "r") as f3:

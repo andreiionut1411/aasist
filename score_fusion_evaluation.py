@@ -99,9 +99,9 @@ def fuse_and_evaluate(gt_file, pred_file1, pred_file2, output_path):
     print(f"Threshold at EER: {threshold:.4f}")
 
 
-ground_truth_file = "/home/andrei/facultate/licenta/combined_test_file.txt"
-prediction_file = "echo_test/titanet.txt"
-spoof_file = "echo_test/multihead_aasist_results.txt"
+ground_truth_file = "/home/andrei/facultate/licenta/rsc_combined_test_file.txt"
+prediction_file = "rsc_test/titanet.txt"
+spoof_file = "rsc_test/wav2vec_results.txt"
 # results = evaluate_performance(ground_truth_file, prediction_file)
 
 # print("Evaluation Results:")

@@ -354,3 +354,34 @@ class Model(nn.Module):
         output = self.out_layer(proj_ST)
 
         return proj_ST, output
+
+    def extract_features(self, x, Freq_aug=False):
+        nb_samp1 = x.shape[0]
+        len_seq = x.shape[1]
+        x = x.view(nb_samp1, 1, len_seq)
+
+        x = self.conv_time(x, mask=Freq_aug)
+        x = x.unsqueeze(dim=1)
+        x = F.max_pool2d(torch.abs(x), (3, 3))
+
+        x = self.first_bn(x)
+        x = self.selu(x)
+
+        e_T = self.encoder_T(x)
+        e_T, _ = torch.max(torch.abs(e_T), dim=3)
+        gat_T = self.GAT_layer_T(e_T.transpose(1, 2))
+        pool_T = self.pool_T(gat_T)
+        out_T = self.proj_T(pool_T.transpose(1, 2))
+
+        e_S = self.encoder_S(x)
+        e_S, _ = torch.max(torch.abs(e_S), dim=2)
+        gat_S = self.GAT_layer_S(e_S.transpose(1, 2))
+        pool_S = self.pool_S(gat_S)
+        out_S = self.proj_S(pool_S.transpose(1, 2))
+
+        gat_ST = torch.mul(out_T, out_S)
+        gat_ST = self.GAT_layer_ST(gat_ST.transpose(1, 2))
+        pool_ST = self.pool_ST(gat_ST)
+        proj_ST = self.proj_ST(pool_ST).flatten(1)
+
+        return proj_ST

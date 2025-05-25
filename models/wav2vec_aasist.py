@@ -540,11 +540,8 @@ class Model(nn.Module):
 
     def forward(self, x, Freq_aug=False):
         x = self.wav2vec2.extract_features(x)[0][-1]
-        print(x.shape)
         x = self.fc_finetune(x)
-        print(x.shape)
         x = x.transpose(1, 2)
-        print(x.shape)
         x = x.unsqueeze(1)
         x = F.max_pool2d(x, kernel_size=(3, 3))
         x = self.first_bn(x)
@@ -621,3 +618,83 @@ class Model(nn.Module):
         output = self.out_layer(last_hidden)
 
         return last_hidden, output
+
+
+    def extract_features(self, x, Freq_aug=False):
+        x = self.wav2vec2.extract_features(x)[0][-1]
+        x = self.fc_finetune(x)
+        x = x.transpose(1, 2)
+        x = x.unsqueeze(1)
+        x = F.max_pool2d(x, kernel_size=(3, 3))
+        x = self.first_bn(x)
+        x = self.selu(x)
+
+        # get embeddings using encoder
+        # (#bs, #filt, #spec, #seq)
+        e = self.encoder(x)
+
+        # spectral GAT (GAT-S)
+        e_S, _ = torch.max(torch.abs(e), dim=3)  # max along time
+        e_S = e_S.transpose(1, 2) + self.pos_S
+
+        gat_S = self.GAT_layer_S(e_S)
+        out_S = self.pool_S(gat_S)  # (#bs, #node, #dim)
+
+        # temporal GAT (GAT-T)
+        e_T, _ = torch.max(torch.abs(e), dim=2)  # max along freq
+        e_T = e_T.transpose(1, 2)
+
+        gat_T = self.GAT_layer_T(e_T)
+        out_T = self.pool_T(gat_T)
+
+        # learnable master node
+        master1 = self.master1.expand(x.size(0), -1, -1)
+        master2 = self.master2.expand(x.size(0), -1, -1)
+
+        # inference 1
+        out_T1, out_S1, master1 = self.HtrgGAT_layer_ST11(
+            out_T, out_S, master=self.master1)
+
+        out_S1 = self.pool_hS1(out_S1)
+        out_T1 = self.pool_hT1(out_T1)
+
+        out_T_aug, out_S_aug, master_aug = self.HtrgGAT_layer_ST12(
+            out_T1, out_S1, master=master1)
+        out_T1 = out_T1 + out_T_aug
+        out_S1 = out_S1 + out_S_aug
+        master1 = master1 + master_aug
+
+        # inference 2
+        out_T2, out_S2, master2 = self.HtrgGAT_layer_ST21(
+            out_T, out_S, master=self.master2)
+        out_S2 = self.pool_hS2(out_S2)
+        out_T2 = self.pool_hT2(out_T2)
+
+        out_T_aug, out_S_aug, master_aug = self.HtrgGAT_layer_ST22(
+            out_T2, out_S2, master=master2)
+        out_T2 = out_T2 + out_T_aug
+        out_S2 = out_S2 + out_S_aug
+        master2 = master2 + master_aug
+
+        out_T1 = self.drop_way(out_T1)
+        out_T2 = self.drop_way(out_T2)
+        out_S1 = self.drop_way(out_S1)
+        out_S2 = self.drop_way(out_S2)
+        master1 = self.drop_way(master1)
+        master2 = self.drop_way(master2)
+
+        out_T = torch.max(out_T1, out_T2)
+        out_S = torch.max(out_S1, out_S2)
+        master = torch.max(master1, master2)
+
+        T_max, _ = torch.max(torch.abs(out_T), dim=1)
+        T_avg = torch.mean(out_T, dim=1)
+
+        S_max, _ = torch.max(torch.abs(out_S), dim=1)
+        S_avg = torch.mean(out_S, dim=1)
+
+        last_hidden = torch.cat(
+            [T_max, T_avg, S_max, S_avg, master.squeeze(1)], dim=1)
+
+        last_hidden = self.drop(last_hidden)
+        return last_hidden
