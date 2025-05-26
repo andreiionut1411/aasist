@@ -37,6 +37,8 @@ class MoEGate(nn.Module):
     def __init__(self, input_dim, num_experts=2, hidden_dim=128, use_conv=True):
         super().__init__()
         self.use_conv = use_conv
+        self.temperature = 0.5
+
         if self.use_conv:
             self.conv = nn.Conv1d(in_channels=1, out_channels=4, kernel_size=1)
             self.fc1 = nn.Linear(4 * input_dim, hidden_dim)
@@ -51,8 +53,9 @@ class MoEGate(nn.Module):
             x = x.unsqueeze(1)  # [B, 1, D]
             x = F.relu(self.conv(x))  # [B, 4, D]
             x = x.view(x.size(0), -1)  # [B, 4*D]
-        x = F.relu(self.fc1(x))       # [B, hidden_dim]
-        weights = self.softmax(self.fc2(x))  # [B, num_experts]
+        x = F.relu(self.fc1(x))
+        logits = self.fc2(x)
+        weights = F.softmax(logits / self.temperature, dim=1)
         return weights
 
 
@@ -180,12 +183,6 @@ def main(args: argparse.Namespace) -> None:
         p.requires_grad = False
     for p in model2.parameters():
         p.requires_grad = False
-
-    # Unfreeze only the output layer (classification head)
-    for p in model1.out_layer.parameters():
-        p.requires_grad = True
-    for p in model2.out_layer.parameters():
-        p.requires_grad = True
 
     sample_batch = next(iter(trn_loader))
     sample_input = sample_batch[0].to(device)
