@@ -37,7 +37,7 @@ class MoEGate(nn.Module):
     def __init__(self, input_dim, num_experts=2, hidden_dim=128, use_conv=True):
         super().__init__()
         self.use_conv = use_conv
-        self.temperature = 0.5
+        self.temperature = 1.0
 
         if self.use_conv:
             self.conv = nn.Conv1d(in_channels=1, out_channels=4, kernel_size=1)
@@ -74,15 +74,19 @@ class CombinedModel(nn.Module):
 
         # Optional: additional processing layer after gating (like in the paper)
         self.post_gate_conv = nn.Sequential(
-            nn.Linear(num_classes, num_classes),
+            nn.Linear(256 + num_classes, 128),
             nn.ReLU(),
-            nn.Linear(num_classes, num_classes)
+            nn.Linear(128, num_classes)
         )
+        self.proj1 = nn.Linear(dim1, 256)
+        self.proj2 = nn.Linear(dim2, 256)
 
     def forward(self, x, Freq_aug=None):
         # Extract features from each expert
         feat1 = self.model1.extract_features(x)
         feat2 = self.model2.extract_features(x)
+        proj_feat1 = self.proj1(feat1)
+        proj_feat2 = self.proj2(feat2)
         combined_feat = torch.cat([feat1, feat2], dim=1)  # [B, D1 + D2]
 
         # Get per-sample weights for experts
@@ -96,7 +100,9 @@ class CombinedModel(nn.Module):
         out = weights[:, 0:1] * out1 + weights[:, 1:2] * out2  # [B, C]
 
         # Optional convolutional layer after gating (from MoE paper)
-        out = self.post_gate_conv(out)
+        weighted_feat = weights[:, 0:1] * proj_feat1 + weights[:, 1:2] * proj_feat2
+        post_input = torch.cat([weighted_feat, out], dim=1)
+        out = self.post_gate_conv(post_input)
 
         return combined_feat, out
 
@@ -288,7 +294,7 @@ def main(args: argparse.Namespace) -> None:
                 print("best model find at epoch", epoch)
                 best_dev_eer = dev_eer
                 torch.save(model.state_dict(),
-                        model_save_path / "epoch_{}_{:03.3f}.pth".format(epoch, dev_eer))
+                       model_save_path / "best.pth")
 
                 print("Saving epoch {} for swa".format(epoch))
                 optimizer_swa.update_swa()
@@ -310,6 +316,11 @@ def main(args: argparse.Namespace) -> None:
     plt.show()
 
     print("Start final evaluation")
+    best_model_path = model_save_path / "best.pth"
+    if best_model_path.exists():
+        model.load_state_dict(torch.load(best_model_path))
+        print(f"Loaded best model from {best_model_path}")
+
     epoch += 1
     if n_swa_update > 0:
         optimizer_swa.swap_swa_sgd()
@@ -324,18 +335,6 @@ def main(args: argparse.Namespace) -> None:
     f_log.write("=" * 5 + "\n")
     f_log.write("EER: {:.3f}, min t-DCF: {:.5f}".format(eval_eer, eval_tdcf))
     f_log.close()
-
-    torch.save(model.state_dict(),
-               model_save_path / "swa.pth")
-
-    if eval_eer <= best_eval_eer:
-        best_eval_eer = eval_eer
-    if eval_tdcf <= best_eval_tdcf:
-        best_eval_tdcf = eval_tdcf
-        torch.save(model.state_dict(),
-                   model_save_path / "best.pth")
-    print("Exp FIN. EER: {:.3f}, min t-DCF: {:.5f}".format(
-        best_eval_eer, best_eval_tdcf))
 
 
 def get_model(model_config: Dict, device: torch.device):
