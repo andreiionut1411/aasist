@@ -203,22 +203,20 @@ def main(args: argparse.Namespace) -> None:
 
     # evaluates pretrained model and exit script
     if args.eval:
+        # Load configs
         with open(args.config1, "r") as f1, open(args.config2, "r") as f2:
             config1 = json.load(f1)
             config2 = json.load(f2)
 
         model_config1 = config1["model_config"]
         model_config2 = config2["model_config"]
+        config = config1  # ensure consistent use
 
-        # Load both models
+        # Load base models
         model1 = get_model(model_config1, device)
         model2 = get_model(model_config2, device)
-
-        # Load weights
         model1.load_state_dict(torch.load(config1["model_path"], map_location=device))
         model2.load_state_dict(torch.load(config2["model_path"], map_location=device))
-
-        # Get feature dimensions dynamically
         model1.eval()
         model2.eval()
         for p in model1.parameters():
@@ -226,12 +224,14 @@ def main(args: argparse.Namespace) -> None:
         for p in model2.parameters():
             p.requires_grad = False
 
+        # Get feature dims from eval set
         sample_input = next(iter(eval_loader))[0].to(device)
         with torch.no_grad():
             feature_dim1 = model1.extract_features(sample_input).shape[1]
             feature_dim2 = model2.extract_features(sample_input).shape[1]
+        num_classes = model1.out_layer.out_features
 
-        # Build ensemble model
+        # Build combined model
         model = CombinedModel(model1, model2, feature_dim1, feature_dim2, num_classes).to(device)
 
         # Load trained ensemble weights
@@ -240,20 +240,27 @@ def main(args: argparse.Namespace) -> None:
 
         model.eval()
 
+        # Reconstruct optimizer for SWA logic
+        optim_config = config["optim_config"]
+        optim_config["epochs"] = config["num_epochs"]
+        optim_config["steps_per_epoch"] = len(trn_loader)
+        optimizer, _ = create_optimizer(model.parameters(), optim_config)
+        optimizer_swa = SWA(optimizer)
+
+        # Optional: if you used SWA, update BN stats
+        optimizer_swa.bn_update(trn_loader, model, device=device)
+
         # Run evaluation
         print("Start evaluation...")
-        produce_evaluation_file(eval_loader, model, device,
-                                eval_score_path, eval_trial_path)
-        calculate_tDCF_EER(cm_scores_file=eval_score_path,
-                        asv_score_file=database_path / config["asv_score_path"],
-                        output_file=model_tag / "t-DCF_EER.txt")
-        print("DONE.")
+        produce_evaluation_file(eval_loader, model, device, eval_score_path, eval_trial_path)
         eval_eer, eval_tdcf = calculate_tDCF_EER(
             cm_scores_file=eval_score_path,
             asv_score_file=database_path / config["asv_score_path"],
-            output_file=model_tag / "loaded_model_t-DCF_EER.txt")
+            output_file=model_tag / "loaded_model_t-DCF_EER.txt"
+        )
+        print("DONE.")
+        print(f"EER: {eval_eer:.3f}, t-DCF: {eval_tdcf:.5f}")
         sys.exit(0)
-
 
     # get optimizer and scheduler
     optim_config["steps_per_epoch"] = len(trn_loader)
@@ -334,6 +341,7 @@ def main(args: argparse.Namespace) -> None:
     if n_swa_update > 0:
         optimizer_swa.swap_swa_sgd()
         optimizer_swa.bn_update(trn_loader, model, device=device)
+        torch.save(model.state_dict(), model_save_path / "swa_best.pth")
     produce_evaluation_file(eval_loader, model, device, eval_score_path,
                             eval_trial_path)
     eval_eer, eval_tdcf = calculate_tDCF_EER(cm_scores_file=eval_score_path,
