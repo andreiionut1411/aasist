@@ -219,6 +219,13 @@ def main(args: argparse.Namespace) -> None:
         model2.load_state_dict(torch.load(config2["model_path"], map_location=device))
 
         # Get feature dimensions dynamically
+        model1.eval()
+        model2.eval()
+        for p in model1.parameters():
+            p.requires_grad = False
+        for p in model2.parameters():
+            p.requires_grad = False
+
         sample_input = next(iter(eval_loader))[0].to(device)
         with torch.no_grad():
             feature_dim1 = model1.extract_features(sample_input).shape[1]
@@ -230,6 +237,8 @@ def main(args: argparse.Namespace) -> None:
         # Load trained ensemble weights
         model.load_state_dict(torch.load(config1["ens_path"], map_location=device))
         print("Model loaded : {}".format(config1["ens_path"]))
+
+        model.eval()
 
         # Run evaluation
         print("Start evaluation...")
